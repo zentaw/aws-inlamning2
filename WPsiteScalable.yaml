@@ -92,14 +92,30 @@ Resources:
       FileSystemTags:
         - Key: Name
           Value: TestEFS
-  
-  MountTargetSub1:  
+
+  EFSMountTargetSub1:  
     Type: AWS::EFS::MountTarget
     Properties: 
       FileSystemId: !Ref EFSFileSystem
       SecurityGroups: 
         - !GetAtt EFSSecGroup.GroupId
       SubnetId: !Ref Snet1
+
+  EFSMountTargetSub2:  
+    Type: AWS::EFS::MountTarget
+    Properties: 
+      FileSystemId: !Ref EFSFileSystem
+      SecurityGroups: 
+        - !GetAtt EFSSecGroup.GroupId
+      SubnetId: !Ref Snet2
+
+  EFSMountTargetSub3:  
+    Type: AWS::EFS::MountTarget
+    Properties: 
+      FileSystemId: !Ref EFSFileSystem
+      SecurityGroups: 
+        - !GetAtt EFSSecGroup.GroupId
+      SubnetId: !Ref Snet3
 
   # EFSMTsub1:
   #   Type: AWS::EFS::MountTarget
