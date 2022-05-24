@@ -381,3 +381,6 @@ Resources:
         Value:
           Ref: minASG
       ComparisonOperator: LessThanThreshold
+
+#via userdata kan du initiera wordpress #wp-cli wp core install
+#om du inte ansluter första gången via LB då kommer det in automatiskt.
