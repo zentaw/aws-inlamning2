@@ -1,6 +1,6 @@
 ---
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Wordpress ASG with TG and LB
+Description: Wordpress ASG with TG LB RDS EFS
 
 Parameters:
   ImageId:
@@ -42,6 +42,15 @@ Resources:
         SourceSecurityGroupName: !Ref HTTPminALBFrontEnd
         FromPort: 80
         ToPort: 80
+  HTTPSecGroupminWPtemp:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Temp Ingress to slit o slang WP instance 80
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: '0.0.0.0/0'
   SSHSecGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
@@ -92,7 +101,7 @@ Resources:
       Encrypted: true
       FileSystemTags:
         - Key: Name
-          Value: TestEFS
+          Value: !Sub '${AWS::StackName}-efs'
 
   EFSMountTargetSub1:  
     Type: AWS::EFS::MountTarget
@@ -122,13 +131,10 @@ Resources:
     Type: AWS::RDS::DBInstance
     Properties: 
       AllocatedStorage: 20
-      # AvailabilityZone: eu-west-1
       BackupRetentionPeriod: 0
       DBInstanceClass: db.t3.micro
-      DBInstanceIdentifier: dbinstance-1
+      DBInstanceIdentifier: !Sub '${AWS::StackName}-dbinstance'
       DBName: ApacheDBnamn
-      # DBSecurityGroups: 
-      #   - !Ref RDSSecGroup
       Engine: mysql
       EngineVersion: 8.0.28
       MasterUsername: admin
@@ -138,5 +144,226 @@ Resources:
       VPCSecurityGroups: 
         - !GetAtt RDSSecGroup.GroupId
 
-  # WPEc2Instance:
-  #   Description: Mount EFS konfigurera sql och wp sedan slängas
+  minLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties: 
+      IpAddressType: ipv4
+      Name: WPLB
+      SecurityGroups: 
+        - !GetAtt HTTPminALBFrontEnd.GroupId
+      Subnets: 
+        - !Ref Snet1
+        - !Ref Snet2
+        - !Ref Snet3
+      Type: application
+      Scheme: internet-facing
+  
+  minListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref minTargetGroup
+      LoadBalancerArn: !Ref minLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  minTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      IpAddressType: ipv4
+      Name: TG1
+      Protocol: HTTP
+      Port: 80
+      VpcId: !Ref VPCID
+
+  minWPtemp:
+    Type: 'AWS::EC2::Instance'
+    DependsOn: 
+      - EFSMountTargetSub1
+      - EFSMountTargetSub2
+      - EFSMountTargetSub3
+      - RDSmySQL
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref Key1
+      SecurityGroupIds:
+        - !GetAtt HTTPSecGroup.GroupId
+        - !GetAtt SSHSecGroup.GroupId
+        - !GetAtt WPInstanceSecGroup.GroupId
+        - !GetAtt HTTPSecGroupminWPtemp.GroupId
+      SubnetId:
+        Ref: Snet1
+        Ref: Snet2
+        Ref: Snet3
+      Tags:
+        - Key: Name
+          Value: tempec2
+      InstanceInitiatedShutdownBehavior: terminate
+      UserData:
+        Fn::Base64: 
+          !Sub |
+            #!/bin/bash
+            yum update -y
+            yum install -y amazon-efs-utils
+            mkdir -p /var/www/html
+            groupadd www
+            usermod -a -G www ec2-user
+            chgrp -R www /var/www/html
+            chmod 2775 /var/www/html
+            find /var/www/html -type d -exec sudo chmod 2775 {} +
+            find /var/www/html -type f -exec sudo chmod 0664 {} +
+            mount -t efs -o tls ${EFSFileSystem} /var/www/html/
+            amazon-linux-extras install -y lamp-mariadb10.2-php7.2 php7.2
+            yum install -y httpd
+            systemctl start httpd
+            systemctl enable httpd
+            usermod -a -G apache ec2-user
+            chown -R ec2-user:apache /var/www
+            chmod 2775 /var/www && find /var/www -type d -exec sudo chmod 2775 {} \;
+            find /var/www -type f -exec sudo chmod 0664 {} \;
+            wget https://wordpress.org/latest.tar.gz
+            tar -xzf latest.tar.gz
+            cp wordpress/wp-config-sample.php wordpress/wp-config.php
+            sed -i 's/database_name_here/ApacheDBnamn/' wordpress/wp-config.php
+            sed -i 's/username_here/admin/' wordpress/wp-config.php
+            sed -i 's/password_here/losenord/' wordpress/wp-config.php
+            sed -i 's/localhost/${RDSmySQL.Endpoint.Address}:3306/' wordpress/wp-config.php
+            SALT=$(curl -L https://api.wordpress.org/secret-key/1.1/salt/)
+            STRING='put your unique phrase here'
+            printf '%s\n' "g/$STRING/d" a "$SALT" . w | ed -s wordpress/wp-config.php
+            cp -r wordpress/* /var/www/html/
+            sed -i '/<Directory "\/var\/www\/html">/,/<\/Directory>/ s/AllowOverride None/AllowOverride All/' /etc/httpd/conf/httpd.conf
+            yum install php-gd -y
+            yum install php-mbstring php-xml -y
+            systemctl enable httpd
+            systemctl restart httpd
+            systemctl restart php-fpm
+            cd /var/www/html
+            wget https://www.phpmyadmin.net/downloads/phpMyAdmin-latest-all-languages.tar.gz
+            mkdir phpMyAdmin && tar -xvzf phpMyAdmin-latest-all-languages.tar.gz -C phpMyAdmin --strip-components 1
+            rm phpMyAdmin-latest-all-languages.tar.gz
+            cd /var/www/html/phpMyAdmin
+            cp config.sample.inc.php config.inc.php
+            sed -i 's/localhost/${RDSmySQL.Endpoint.Address}:3306/' config.inc.php
+            shutdown now
+
+  minLaunchTemplate:
+    Type: 'AWS::EC2::LaunchTemplate'
+    Properties:
+      LaunchTemplateName: !Sub '${AWS::StackName}-launch-template-for-auto-scaling'
+      LaunchTemplateData:
+        SecurityGroupIds:
+          - !GetAtt HTTPSecGroup.GroupId
+          - !GetAtt SSHSecGroup.GroupId
+          - !GetAtt WPInstanceSecGroup.GroupId
+        ImageId: !Ref ImageId
+        InstanceType: !Ref InstanceType
+        KeyName: MyDemoKey1
+        UserData:
+          Fn::Base64: 
+            !Sub |
+              #!/bin/bash
+              yum update -y
+              yum install -y amazon-efs-utils
+              mkdir -p /var/www/html
+              groupadd www
+              usermod -a -G www ec2-user
+              chgrp -R www /var/www/html
+              chmod 2775 /var/www/html
+              find /var/www/html -type d -exec sudo chmod 2775 {} +
+              find /var/www/html -type f -exec sudo chmod 0664 {} +
+              mount -t efs -o tls ${EFSFileSystem} /var/www/html/
+              amazon-linux-extras install -y lamp-mariadb10.2-php7.2 php7.2
+              yum install -y httpd
+              systemctl start httpd
+              systemctl enable httpd
+              usermod -a -G apache ec2-user
+              chown -R ec2-user:apache /var/www
+              chmod 2775 /var/www && find /var/www -type d -exec sudo chmod 2775 {} \;
+              find /var/www -type f -exec sudo chmod 0664 {} \;
+              sed -i '/<Directory "\/var\/www\/html">/,/<\/Directory>/ s/AllowOverride None/AllowOverride All/' /etc/httpd/conf/httpd.conf
+              yum install php-gd -y
+              yum install php-mbstring php-xml -y
+              systemctl restart httpd
+              systemctl restart php-fpm
+              amazon-linux-extras install epel -y
+              yum update -y
+              yum install stress -y
+
+  minASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: 
+      - minWPtemp
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref minLaunchTemplate
+        Version: !GetAtt minLaunchTemplate.LatestVersionNumber
+      AvailabilityZones:
+        Fn::GetAZs: ''
+      TargetGroupARNs:
+        - !Ref minTargetGroup
+      MaxSize: '3'
+      MinSize: '1'
+      DesiredCapacity: '1'
+      VPCZoneIdentifier:   
+        - !Ref Snet1
+        - !Ref Snet2
+        - !Ref Snet3
+      MetricsCollection: 
+        - Granularity: "1Minute"
+          Metrics: 
+            - "GroupMinSize"
+            - "GroupMaxSize"
+
+  minScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: minASG
+      Cooldown: '60'
+      ScalingAdjustment: '1'
+  minScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: minASG
+      Cooldown: '60'
+      ScalingAdjustment: "-1"
+  CPUAlarmHigh:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Scale-up if CPU > 80% for 5 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: '300'
+      EvaluationPeriods: '1'
+      Threshold: '80'
+      AlarmActions:
+      - Ref: minScaleUpPolicy
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value:
+          Ref: minASG
+      ComparisonOperator: GreaterThanThreshold
+  CPUAlarmLow:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Scale-down if CPU < 70% for 5 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: '300'
+      EvaluationPeriods: '1'
+      Threshold: '70'
+      AlarmActions:
+      - Ref: minScaleDownPolicy
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value:
+          Ref: minASG
+      ComparisonOperator: LessThanThreshold
