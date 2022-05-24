@@ -37,6 +37,7 @@ Resources:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
       GroupDescription: Instance to allow HTTP access via port 80
+      GroupName: !Sub '${AWS::StackName}-HTTPinternalSG'
       SecurityGroupIngress:
         IpProtocol: tcp
         SourceSecurityGroupName: !Ref HTTPminALBFrontEnd
@@ -45,7 +46,8 @@ Resources:
   HTTPSecGroupminWPtemp:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
-      GroupDescription: Temp Ingress to slit o slang WP instance 80
+      GroupDescription: Temp backdoor Ingress to config WP instance 80
+      GroupName: !Sub '${AWS::StackName}-HTTPBackdoorSG'
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: '80'
@@ -55,6 +57,7 @@ Resources:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
       GroupDescription: Instance to allow SSH access via port 22
+      GroupName: !Sub '${AWS::StackName}-SSHSG'
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: '22'
@@ -63,7 +66,8 @@ Resources:
   HTTPminALBFrontEnd:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
-      GroupDescription: LoadBalancer to allow HTTP access to minTargetGroup 80
+      GroupDescription: LoadBalancer to allow HTTP access to TargetGroup
+      GroupName: !Sub '${AWS::StackName}-HTTPFrontend'
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 80
@@ -72,11 +76,13 @@ Resources:
   WPInstanceSecGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Properties: 
-      GroupDescription: Instance to EFS and RDS
+      GroupDescription: Allow ingress to EFS and RDS dummy group
+      GroupName: !Sub '${AWS::StackName}-WPISG'
   EFSSecGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
       GroupDescription: Instance to allow EFS access
+      GroupName: !Sub '${AWS::StackName}-EFSSG'
       SecurityGroupIngress:
         IpProtocol: tcp
         SourceSecurityGroupName: !Ref WPInstanceSecGroup
@@ -86,6 +92,7 @@ Resources:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
       GroupDescription: Instance to allow RDS access
+      GroupName: !Sub '${AWS::StackName}-RDSSG'
       SecurityGroupIngress:
         IpProtocol: tcp
         SourceSecurityGroupName: !Ref WPInstanceSecGroup
@@ -148,7 +155,7 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties: 
       IpAddressType: ipv4
-      Name: WPLB
+      Name: !Sub '${AWS::StackName}-websrvLB'
       SecurityGroups: 
         - !GetAtt HTTPminALBFrontEnd.GroupId
       Subnets: 
@@ -172,7 +179,7 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       IpAddressType: ipv4
-      Name: TG1
+      Name: !Sub '${AWS::StackName}-TG'
       Protocol: HTTP
       Port: 80
       VpcId: !Ref VPCID
@@ -199,7 +206,7 @@ Resources:
         Ref: Snet3
       Tags:
         - Key: Name
-          Value: tempec2
+          Value: !Sub '${AWS::StackName}-tempec2'
       InstanceInitiatedShutdownBehavior: terminate
       UserData:
         Fn::Base64: 
@@ -252,7 +259,7 @@ Resources:
   minLaunchTemplate:
     Type: 'AWS::EC2::LaunchTemplate'
     Properties:
-      LaunchTemplateName: !Sub '${AWS::StackName}-launch-template-for-auto-scaling'
+      LaunchTemplateName: !Sub '${AWS::StackName}-LTforASG'
       LaunchTemplateData:
         SecurityGroupIds:
           - !GetAtt HTTPSecGroup.GroupId
@@ -297,6 +304,7 @@ Resources:
     DependsOn: 
       - minWPtemp
     Properties:
+      AutoScalingGroupName: !Sub '${AWS::StackName}-WPASG'
       LaunchTemplate:
         LaunchTemplateId: !Ref minLaunchTemplate
         Version: !GetAtt minLaunchTemplate.LatestVersionNumber
@@ -316,6 +324,10 @@ Resources:
           Metrics: 
             - "GroupMinSize"
             - "GroupMaxSize"
+      Tags:
+        - Key: Name
+          PropagateAtLaunch: true
+          Value: !Sub '${AWS::StackName}-WPASG'
 
   minScaleUpPolicy:
     Type: AWS::AutoScaling::ScalingPolicy
@@ -337,6 +349,7 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmDescription: Scale-up if CPU > 80% for 5 minutes
+      AlarmName: !Sub '${AWS::StackName}-CPUHigh'
       MetricName: CPUUtilization
       Namespace: AWS/EC2
       Statistic: Average
@@ -354,6 +367,7 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmDescription: Scale-down if CPU < 70% for 5 minutes
+      AlarmName: !Sub '${AWS::StackName}-CPULow'
       MetricName: CPUUtilization
       Namespace: AWS/EC2
       Statistic: Average
