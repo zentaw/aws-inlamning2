@@ -43,26 +43,26 @@ Resources:
         SourceSecurityGroupName: !Ref HTTPminALBFrontEnd
         FromPort: 80
         ToPort: 80
-  HTTPSecGroupminWPtemp:
-    Type: 'AWS::EC2::SecurityGroup'
-    Properties:
-      GroupDescription: Temp backdoor Ingress to config WP instance 80
-      GroupName: !Sub '${AWS::StackName}-HTTPBackdoorSG'
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: '80'
-          ToPort: '80'
-          CidrIp: '0.0.0.0/0'
-  SSHSecGroup:
-    Type: 'AWS::EC2::SecurityGroup'
-    Properties:
-      GroupDescription: Instance to allow SSH access via port 22
-      GroupName: !Sub '${AWS::StackName}-SSHSG'
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: '22'
-          ToPort: '22'
-          CidrIp: '0.0.0.0/0'
+  # HTTPSecGroupminWPtemp:
+  #   Type: 'AWS::EC2::SecurityGroup'
+  #   Properties:
+  #     GroupDescription: Temp backdoor Ingress to config WP instance 80
+  #     GroupName: !Sub '${AWS::StackName}-HTTPBackdoorSG'
+  #     SecurityGroupIngress:
+  #       - IpProtocol: tcp
+  #         FromPort: '80'
+  #         ToPort: '80'
+  #         CidrIp: '0.0.0.0/0'
+  # SSHSecGroup:
+  #   Type: 'AWS::EC2::SecurityGroup'
+  #   Properties:
+  #     GroupDescription: Instance to allow SSH access via port 22
+  #     GroupName: !Sub '${AWS::StackName}-SSHSG'
+  #     SecurityGroupIngress:
+  #       - IpProtocol: tcp
+  #         FromPort: '22'
+  #         ToPort: '22'
+  #         CidrIp: '0.0.0.0/0'
   HTTPminALBFrontEnd:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
@@ -197,9 +197,9 @@ Resources:
       KeyName: !Ref Key1
       SecurityGroupIds:
         - !GetAtt HTTPSecGroup.GroupId
-        - !GetAtt SSHSecGroup.GroupId
         - !GetAtt WPInstanceSecGroup.GroupId
-        - !GetAtt HTTPSecGroupminWPtemp.GroupId
+        # - !GetAtt SSHSecGroup.GroupId
+        # - !GetAtt HTTPSecGroupminWPtemp.GroupId
       SubnetId:
         Ref: Snet1
         Ref: Snet2
@@ -263,11 +263,11 @@ Resources:
       LaunchTemplateData:
         SecurityGroupIds:
           - !GetAtt HTTPSecGroup.GroupId
-          - !GetAtt SSHSecGroup.GroupId
           - !GetAtt WPInstanceSecGroup.GroupId
+          # - !GetAtt SSHSecGroup.GroupId
         ImageId: !Ref ImageId
         InstanceType: !Ref InstanceType
-        KeyName: MyDemoKey1
+        KeyName: !Ref Key1
         UserData:
           Fn::Base64: 
             !Sub |
